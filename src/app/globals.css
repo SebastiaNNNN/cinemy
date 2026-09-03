@@ -103,10 +103,9 @@ a { color: inherit; text-decoration: none; }
 .pagination { display: flex; justify-content: space-between; align-items: center; padding-top: 20px; border-top: 1px solid #292929; }
 .pagination a { padding: 12px 16px; border-radius: 6px; background: #292929; font-size: .8rem; font-weight: 700; }
 .pagination a:hover { background: #3a3a3a; }
-.load-more-area { display: flex; justify-content: center; padding: 2px 0 34px; }
-.load-more-button { min-width: 210px; padding: 14px 24px; border: 1px solid #555; border-radius: 7px; background: #f3f3f3; color: #111; font-size: .82rem; font-weight: 800; cursor: pointer; transition: transform .18s ease, background .18s ease; }
-.load-more-button:hover:not(:disabled) { transform: translateY(-2px); background: white; }
-.load-more-button:disabled { opacity: .55; cursor: wait; }
+.infinite-scroll-sentinel { min-height: 72px; display: grid; place-items: center; color: #777; font-size: .76rem; }
+.infinite-scroll-sentinel span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: var(--red); box-shadow: 0 0 12px rgba(229,9,20,.8); animation: loading-pulse 1.2s ease-in-out infinite; }
+@keyframes loading-pulse { 50% { opacity: .3; transform: scale(.7); } }
 .explore-loading { min-height: 100vh; display: grid; place-items: center; background: var(--ink); color: #aaa; }
 
 .player-modal { position: fixed; inset: 0; z-index: 100; display: grid; grid-template-rows: 64px 1fr 50px; background: #050505; }

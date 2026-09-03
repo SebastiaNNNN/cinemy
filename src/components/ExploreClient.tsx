@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { PlayerModal } from "@/components/PlayerModal";
 import type { Movie } from "@/lib/types";
@@ -30,6 +30,7 @@ export function ExploreClient() {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
   const genre = searchParams.get("genre") || "";
   const explicitType = searchParams.get("type");
@@ -98,6 +99,22 @@ export function ExploreClient() {
   const canLoadMore = loadedBatches < TMDB_PAGES_PER_VIEW && hasMore;
   const reachedPageLimit = loadedBatches === TMDB_PAGES_PER_VIEW || !hasMore;
 
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel || !canLoadMore || loading) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setLoadedBatches((count) => Math.min(TMDB_PAGES_PER_VIEW, count + 1));
+        }
+      },
+      { rootMargin: "500px 0px", threshold: 0.01 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [canLoadMore, loading]);
+
   return (
     <main className="explore-page">
       <Navbar query={query} onQueryChange={setQuery} />
@@ -124,12 +141,8 @@ export function ExploreClient() {
         ))}
       </section>
 
-      <div className="load-more-area">
-        {canLoadMore && (
-          <button className="load-more-button" type="button" disabled={loading} onClick={() => setLoadedBatches((count) => count + 1)}>
-            {loading ? "Se încarcă…" : `Încarcă încă ${RESULTS_PER_BATCH}`}
-          </button>
-        )}
+      <div ref={loadMoreSentinelRef} className="infinite-scroll-sentinel" aria-live="polite">
+        {canLoadMore && <span>{loading ? "Se încarcă filmele…" : "Derulează pentru mai multe"}</span>}
       </div>
 
       {reachedPageLimit && !query && (
