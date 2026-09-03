@@ -1,18 +1,58 @@
 "use client";
 
+import Link from "next/link";
+import { useState } from "react";
+
+const genres = [
+  { label: "Acțiune", id: 28 },
+  { label: "Comedie", id: 35 },
+  { label: "Dramă", id: 18 },
+  { label: "SF", id: 878 },
+  { label: "Horror", id: 27 },
+  { label: "Thriller", id: 53 },
+];
+
 interface NavbarProps {
   query: string;
   onQueryChange: (value: string) => void;
 }
 
 export function Navbar({ query, onQueryChange }: NavbarProps) {
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
+
   return (
     <header className="navbar">
-      <a className="brand" href="#top" aria-label="Cinemy - Acasă">CINEMY</a>
+      <Link className="brand" href="/" aria-label="Cinemy - Acasă">CINEMY</Link>
       <nav className="nav-links" aria-label="Navigație principală">
-        <a href="#trending">Acasă</a>
-        <a href="#top-rated">Top filme</a>
-        <a href="#categories">Categorii</a>
+        <Link href="/">Acasă</Link>
+        <Link href="/explore?type=top_rated">Top filme</Link>
+        <div
+          className={`nav-dropdown${categoriesOpen ? " is-open" : ""}`}
+          onMouseEnter={() => setCategoriesOpen(true)}
+          onMouseLeave={() => setCategoriesOpen(false)}
+        >
+          <button
+            className="categories-trigger"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={categoriesOpen}
+            onClick={() => setCategoriesOpen((open) => !open)}
+          >
+            Categorii <span aria-hidden="true">⌄</span>
+          </button>
+          <div className="genre-menu" role="menu">
+            {genres.map((genre) => (
+              <Link
+                key={genre.id}
+                href={`/explore?genre=${genre.id}`}
+                role="menuitem"
+                onClick={() => setCategoriesOpen(false)}
+              >
+                {genre.label}<span aria-hidden="true">›</span>
+              </Link>
+            ))}
+          </div>
+        </div>
       </nav>
       <label className="search-box">
         <span aria-hidden="true">⌕</span>

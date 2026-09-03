@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import type { Movie, WatchHistory } from "@/lib/types";
 import { movieTitle, movieYear } from "@/lib/types";
 
@@ -10,9 +11,10 @@ interface MovieRowProps {
   movies: Movie[];
   onPlay: (movie: Movie, resumeAt?: number) => void;
   progress?: Map<string, WatchHistory>;
+  exploreHref?: string;
 }
 
-export function MovieRow({ id, title, movies, onPlay, progress }: MovieRowProps) {
+export function MovieRow({ id, title, movies, onPlay, progress, exploreHref }: MovieRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
 
   if (!movies.length) return null;
@@ -25,7 +27,7 @@ export function MovieRow({ id, title, movies, onPlay, progress }: MovieRowProps)
     <section className="movie-section" id={id}>
       <div className="section-heading">
         <h2>{title}</h2>
-        <span>Explorează toate <b>›</b></span>
+        {exploreHref && <Link className="explore-link" href={exploreHref}>Explorează toate <b>›</b></Link>}
       </div>
       <div className="row-shell">
         <button className="row-arrow left" onClick={() => scroll(-1)} aria-label={`Derulează ${title} la stânga`}>‹</button>

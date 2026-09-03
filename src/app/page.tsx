@@ -126,11 +126,11 @@ export default function Home() {
             )}
             {loading && <div className="loading-row">Se încarcă selecția pentru tine…</div>}
             <MovieRow title="Continuă vizionarea" movies={continueMovies} onPlay={openPlayer} progress={progressMap} />
-            <MovieRow id="trending" title="În tendințe acum" movies={trending} onPlay={openPlayer} progress={progressMap} />
-            <MovieRow id="top-rated" title="Cele mai apreciate" movies={topRated} onPlay={openPlayer} progress={progressMap} />
+            <MovieRow id="trending" title="În tendințe acum" movies={trending} onPlay={openPlayer} progress={progressMap} exploreHref="/explore?type=trending" />
+            <MovieRow id="top-rated" title="Cele mai apreciate" movies={topRated} onPlay={openPlayer} progress={progressMap} exploreHref="/explore?type=top_rated" />
             <div id="categories">
               {categories.map((category) => (
-                <MovieRow key={category.id} id={category.id} title={category.title} movies={categoryRows[category.id] ?? []} onPlay={openPlayer} progress={progressMap} />
+                <MovieRow key={category.id} id={category.id} title={category.title} movies={categoryRows[category.id] ?? []} onPlay={openPlayer} progress={progressMap} exploreHref={`/explore?genre=${category.genre}`} />
               ))}
             </div>
           </div>
