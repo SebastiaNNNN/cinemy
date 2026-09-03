@@ -31,8 +31,8 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
   const [error, setError] = useState("");
   const [trailerUrl, setTrailerUrl] = useState("");
   const [loadingTrailer, setLoadingTrailer] = useState(false);
-  
-  // Setat direct pe providerul 4K fără verificări
+
+  // Sursă directă VidLink
   const configuredBaseUrl = "https://vidlink.pro";
   const configuredMode = process.env.NEXT_PUBLIC_STREAM_MODE === "hls" ? "hls" : "iframe";
   const mediaType = movie.media_type || "movie";
@@ -40,20 +40,7 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
   const providerUrl = useMemo(() => {
     if (!configuredBaseUrl) return "";
     const path = mediaType === "tv" ? `/tv/${movie.id}/${season}/${episode}` : `/movie/${movie.id}`;
-    
-    // Parametri optimizați: temă Netflix roșie (#e50914), autoplay și poziție de start
-    const params = new URLSearchParams({
-      autoplay: "true",
-      primaryColor: "e50914",
-      secondaryColor: "141414",
-      iconColor: "e50914",
-      title: "false",
-      poster: "true",
-      player: "default",
-      startAt: Math.floor(resumeAt).toString(),
-    });
-
-    return `${configuredBaseUrl}${path}?${params.toString()}`;
+    return `${configuredBaseUrl}${path}?autoplay=true&start=${Math.floor(resumeAt)}`;
   }, [configuredBaseUrl, mediaType, movie.id, season, episode, resumeAt]);
 
   useEffect(() => {
@@ -105,12 +92,12 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = sourceUrl;
     } else if (Hls.isSupported()) {
-      hls = new Hls({ maxBufferLength: 60, backBufferLength: 30 });
+      hls = new Hls({ maxBufferLength: 40, backBufferLength: 30 });
       hls.loadSource(sourceUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (_, data) => data.fatal && setError("Fluxul nu a putut fi redat."));
+      hls.on(Hls.Events.ERROR, (_, data) => data.fatal && setError("Fluxul HLS nu a putut fi redat."));
     } else {
-      setError("Browserul nu suportă redarea fluxului video.");
+      setError("Browserul nu suportă redarea HLS.");
     }
 
     const loaded = () => {
@@ -136,15 +123,14 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
     };
   }, [mode, sourceUrl, resumeAt, saveProgress]);
 
-  // Ascultător oficial pentru evenimentele de redare din VidLink (postMessage)
+  // Ascultare evenimente de redare din iframe (VidLink & YouTube)
   useEffect(() => {
     if (mode !== "iframe") return;
     const allowedOrigin = providerUrl ? new URL(providerUrl).origin : "https://www.youtube-nocookie.com";
-    
     const receive = (event: MessageEvent) => {
       if (event.origin !== allowedOrigin || !event.data) return;
 
-      // Formatul oficial transmis de VidLink: PLAYER_EVENT
+      // Event format VidLink
       if (event.data.type === "PLAYER_EVENT" && event.data.data) {
         const { event: evt, currentTime, duration } = event.data.data;
         receivedPlayerTimeRef.current = true;
@@ -153,13 +139,19 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
         playingRef.current = evt === "play" || evt === "timeupdate";
         if (evt === "pause" || evt === "ended") void saveProgress();
       }
+
+      // Event format generic
+      if (event.data.type === "timeupdate") {
+        receivedPlayerTimeRef.current = true;
+        if (typeof event.data.currentTime === "number") currentRef.current = event.data.currentTime;
+        if (typeof event.data.duration === "number") durationRef.current = event.data.duration;
+        playingRef.current = !event.data.paused;
+      }
     };
-    
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, [mode, providerUrl, saveProgress]);
 
-  // Cronometru intern de siguranță dacă iframe-ul blochează mesajele
   useEffect(() => {
     if (mode !== "iframe" || !sourceUrl) return;
     const clock = window.setInterval(() => {
@@ -171,7 +163,6 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
     return () => window.clearInterval(clock);
   }, [mode, sourceUrl]);
 
-  // Heartbeat salvare progres la fiecare 10 secunde
   useEffect(() => {
     const heartbeat = window.setInterval(() => {
       if (playingRef.current) void saveProgress();
@@ -179,7 +170,6 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
     return () => window.clearInterval(heartbeat);
   }, [saveProgress]);
 
-  // Închidere la tasta ESC
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     window.addEventListener("keydown", keydown);
@@ -192,47 +182,31 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
   };
 
   return (
-    <div className="player-modal fixed inset-0 z-50 bg-black/95 flex flex-col justify-center items-center" role="dialog" aria-modal="true">
-      <div className="absolute top-4 left-6 right-6 flex items-center justify-between z-10">
-        <div className="text-white text-sm font-semibold flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
-          ACUM REDAI: <span className="text-neutral-300 font-bold">{movieTitle(movie)}</span>
-        </div>
-        <button 
-          onClick={close} 
-          className="text-white bg-neutral-800/80 hover:bg-neutral-700 p-2 rounded-full transition"
-          aria-label="Închide playerul"
-        >
-          ✕
-        </button>
+    <div className="player-modal" role="dialog" aria-modal="true" aria-label={`Player ${movieTitle(movie)}`}>
+      <div className="player-header">
+        <div><span className="live-dot" /> ACUM REDAI <strong>{movieTitle(movie)}</strong></div>
+        <button onClick={close} aria-label="Închide playerul">×</button>
       </div>
-
-      <div className="w-full h-full flex items-center justify-center p-0 md:p-6">
-        {loadingTrailer && <div className="text-white text-lg font-medium">Se inițializează stream-ul…</div>}
-        
+      <div className="player-stage" style={{ width: "100%", height: "100%", position: "relative" }}>
+        {loadingTrailer && <div className="player-message"><span>▶</span><h2>Se încarcă filmul…</h2></div>}
         {!loadingTrailer && sourceUrl && mode === "hls" && (
-          <video ref={videoRef} className="w-full max-w-6xl aspect-video rounded-lg shadow-2xl" controls autoPlay playsInline />
+          <video ref={videoRef} controls autoPlay playsInline aria-label={movieTitle(movie)} style={{ width: "100%", height: "100%" }} />
         )}
-        
         {!loadingTrailer && sourceUrl && mode === "iframe" && (
           <iframe
             src={sourceUrl}
             title={movieTitle(movie)}
-            className="w-full h-full md:max-w-6xl md:aspect-video rounded-none md:rounded-lg border-0 shadow-2xl"
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
+            style={{ width: "100%", height: "100%", border: "none" }}
             onLoad={() => { playingRef.current = true; }}
           />
         )}
-        
-        {!loadingTrailer && !sourceUrl && error && (
-          <div className="text-red-500 font-medium">{error}</div>
-        )}
+        {!loadingTrailer && !sourceUrl && error && <div className="player-message"><h2>{error}</h2></div>}
       </div>
-
-      <div className="absolute bottom-4 left-6 right-6 flex justify-between text-xs text-neutral-400">
-        <span className="bg-red-600/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded font-bold">4K UHD / AUTO</span>
-        <span>Apasă ESC sau butonul din dreapta pentru închidere</span>
+      <div className="player-footer">
+        <span>4K UHD / AUTO</span>
+        <span>ESC pentru închidere</span>
       </div>
     </div>
   );
