@@ -31,8 +31,6 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
   const [error, setError] = useState("");
   const [trailerUrl, setTrailerUrl] = useState("");
   const [loadingTrailer, setLoadingTrailer] = useState(false);
-
-  // Sursă directă VidLink
   const configuredBaseUrl = "https://vidlink.pro";
   const configuredMode = process.env.NEXT_PUBLIC_STREAM_MODE === "hls" ? "hls" : "iframe";
   const mediaType = movie.media_type || "movie";
@@ -123,34 +121,22 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
     };
   }, [mode, sourceUrl, resumeAt, saveProgress]);
 
-  // Ascultare evenimente de redare din iframe (VidLink & YouTube)
   useEffect(() => {
     if (mode !== "iframe") return;
     const allowedOrigin = providerUrl ? new URL(providerUrl).origin : "https://www.youtube-nocookie.com";
     const receive = (event: MessageEvent) => {
-      if (event.origin !== allowedOrigin || !event.data) return;
-
-      // Event format VidLink
-      if (event.data.type === "PLAYER_EVENT" && event.data.data) {
-        const { event: evt, currentTime, duration } = event.data.data;
+      if (event.origin !== allowedOrigin || typeof event.data !== "object") return;
+      const data = event.data as { type?: string; currentTime?: number; duration?: number; paused?: boolean };
+      if (data.type === "timeupdate") {
         receivedPlayerTimeRef.current = true;
-        if (typeof currentTime === "number") currentRef.current = currentTime;
-        if (typeof duration === "number") durationRef.current = duration;
-        playingRef.current = evt === "play" || evt === "timeupdate";
-        if (evt === "pause" || evt === "ended") void saveProgress();
-      }
-
-      // Event format generic
-      if (event.data.type === "timeupdate") {
-        receivedPlayerTimeRef.current = true;
-        if (typeof event.data.currentTime === "number") currentRef.current = event.data.currentTime;
-        if (typeof event.data.duration === "number") durationRef.current = event.data.duration;
-        playingRef.current = !event.data.paused;
+        if (typeof data.currentTime === "number") currentRef.current = data.currentTime;
+        if (typeof data.duration === "number") durationRef.current = data.duration;
+        playingRef.current = !data.paused;
       }
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [mode, providerUrl, saveProgress]);
+  }, [mode, providerUrl]);
 
   useEffect(() => {
     if (mode !== "iframe" || !sourceUrl) return;
@@ -187,10 +173,10 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
         <div><span className="live-dot" /> ACUM REDAI <strong>{movieTitle(movie)}</strong></div>
         <button onClick={close} aria-label="Închide playerul">×</button>
       </div>
-      <div className="player-stage" style={{ width: "100%", height: "100%", position: "relative" }}>
-        {loadingTrailer && <div className="player-message"><span>▶</span><h2>Se încarcă filmul…</h2></div>}
+      <div className="player-stage">
+        {loadingTrailer && <div className="player-message"><span>▶</span><h2>Se încarcă trailerul…</h2></div>}
         {!loadingTrailer && sourceUrl && mode === "hls" && (
-          <video ref={videoRef} controls autoPlay playsInline aria-label={movieTitle(movie)} style={{ width: "100%", height: "100%" }} />
+          <video ref={videoRef} controls autoPlay playsInline aria-label={movieTitle(movie)} />
         )}
         {!loadingTrailer && sourceUrl && mode === "iframe" && (
           <iframe
@@ -198,16 +184,12 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
             title={movieTitle(movie)}
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
-            style={{ width: "100%", height: "100%", border: "none" }}
             onLoad={() => { playingRef.current = true; }}
           />
         )}
         {!loadingTrailer && !sourceUrl && error && <div className="player-message"><h2>{error}</h2></div>}
       </div>
-      <div className="player-footer">
-        <span>4K UHD / AUTO</span>
-        <span>ESC pentru închidere</span>
-      </div>
+      <div className="player-footer"><span>HD</span><span>Trailer / sursă autorizată</span><span>ESC pentru închidere</span></div>
     </div>
   );
 }
