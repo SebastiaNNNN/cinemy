@@ -6,6 +6,7 @@ import { MovieRow } from "@/components/MovieRow";
 import { Navbar } from "@/components/Navbar";
 import { PlayerModal } from "@/components/PlayerModal";
 import type { Movie, WatchHistory } from "@/lib/types";
+import { loadWatchHistory } from "@/lib/progress-storage";
 
 const FALLBACK_HERO: Movie = {
   id: 550,
@@ -42,12 +43,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   const refreshHistory = useCallback(async () => {
-    try {
-      const response = await fetch("/api/progress", { cache: "no-store" });
-      if (response.ok) setHistory(await response.json());
-    } catch {
-      // Aplicația poate funcționa fără sincronizare până este configurat Supabase.
-    }
+    setHistory(await loadWatchHistory());
   }, []);
 
   useEffect(() => {

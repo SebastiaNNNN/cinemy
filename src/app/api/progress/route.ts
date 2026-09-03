@@ -17,7 +17,7 @@ export async function GET() {
     return NextResponse.json(data ?? []);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Eroare necunoscută";
-    return NextResponse.json({ error: message }, { status: 503 });
+    return NextResponse.json({ error: message, fallback: "localStorage" }, { status: 503 });
   }
 }
 
@@ -52,6 +52,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Eroare necunoscută";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, fallback: "localStorage" }, { status: 503 });
   }
 }

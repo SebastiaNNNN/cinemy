@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const query = params.get("q")?.trim();
+  const movieId = params.get("id")?.trim();
   const type = params.get("type") || "trending";
   const genre = params.get("genre");
   const page = Math.max(1, Number(params.get("page")) || 1);
@@ -29,7 +30,10 @@ export async function GET(request: NextRequest) {
   const search = new URLSearchParams({ language: "ro-RO", page: String(page), include_adult: "false" });
   if (apiKey) search.set("api_key", apiKey);
 
-  if (query) {
+  if (movieId && /^\d+$/.test(movieId)) {
+    endpoint = `/movie/${movieId}`;
+    search.set("append_to_response", "videos");
+  } else if (query) {
     endpoint = "/search/movie";
     search.set("query", query);
   } else if (genre) {
@@ -58,10 +62,20 @@ export async function GET(request: NextRequest) {
       results?: Array<{ poster_path?: string | null }>;
       [key: string]: unknown;
     };
-    return NextResponse.json({
-      ...data,
-      results: (data.results ?? []).filter((movie) => Boolean(movie.poster_path)),
-    });
+    if (movieId) {
+      const currentVideos = data.videos as { results?: unknown[] } | undefined;
+      if (!currentVideos?.results?.length) {
+        const videoSearch = new URLSearchParams({ language: "en-US" });
+        if (apiKey) videoSearch.set("api_key", apiKey);
+        const videoResponse = await fetch(`${TMDB_BASE}/movie/${movieId}/videos?${videoSearch}`, {
+          headers: tmdbHeaders(),
+          next: { revalidate: 1800 },
+        });
+        if (videoResponse.ok) data.videos = await videoResponse.json();
+      }
+      return NextResponse.json(data);
+    }
+    return NextResponse.json({ ...data, results: (data.results ?? []).filter((movie) => Boolean(movie.poster_path)) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Eroare necunoscută";
     return NextResponse.json({ error: message }, { status: 500 });
