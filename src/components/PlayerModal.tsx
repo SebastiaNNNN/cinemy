@@ -31,7 +31,7 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, onCl
   const [error, setError] = useState("");
   const [trailerUrl, setTrailerUrl] = useState("");
   const [loadingTrailer, setLoadingTrailer] = useState(false);
-  const configuredBaseUrl = process.env.NEXT_PUBLIC_STREAM_BASE_URL?.replace(/\/$/, "") || "";
+  const configuredBaseUrl = "https://vidlink.pro";
   const configuredMode = process.env.NEXT_PUBLIC_STREAM_MODE === "hls" ? "hls" : "iframe";
   const mediaType = movie.media_type || "movie";
 
