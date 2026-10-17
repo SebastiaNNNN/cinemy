@@ -3,6 +3,23 @@ import type { MediaType } from "@/lib/types";
 // Embed host documented at https://vidstuck.cc/documentation.
 const DEFAULT_EMBED_BASE = "https://vidstuck.cc/embed";
 
+// The provider moved from vidstuck.xyz to vidstuck.cc. A stale deployment
+// variable still pointing at the retired host must not override the new default.
+const RETIRED_EMBED_HOSTS = new Set(["vidstuck.xyz", "www.vidstuck.xyz"]);
+
+function resolveEmbedBase(): string {
+  const configured = process.env.NEXT_PUBLIC_STREAM_BASE_URL?.trim();
+  if (!configured) return DEFAULT_EMBED_BASE;
+  try {
+    const parsed = new URL(configured);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return DEFAULT_EMBED_BASE;
+    if (RETIRED_EMBED_HOSTS.has(parsed.hostname)) return DEFAULT_EMBED_BASE;
+    return configured;
+  } catch {
+    return DEFAULT_EMBED_BASE;
+  }
+}
+
 export function streamEmbedUrl(
   mediaType: MediaType,
   tmdbId: number,
@@ -11,8 +28,7 @@ export function streamEmbedUrl(
   resumeAt = 0,
   language = "en-US",
 ) {
-  const configured = process.env.NEXT_PUBLIC_STREAM_BASE_URL?.trim();
-  const base = (configured || DEFAULT_EMBED_BASE).replace(/\/+$/, "");
+  const base = resolveEmbedBase().replace(/\/+$/, "");
   const id = encodeURIComponent(String(tmdbId));
   const path = mediaType === "tv"
     ? `${base}/tv/${id}/${season}/${episode}`
