@@ -1,6 +1,6 @@
 import type { MediaType } from "@/lib/types";
 
-const DEFAULT_EMBED_BASE = "https://vidstuck.xyz/embed";
+const DEFAULT_EMBED_BASE = "https://vidstuck.cc/embed";
 
 export function streamEmbedUrl(
   mediaType: MediaType,
