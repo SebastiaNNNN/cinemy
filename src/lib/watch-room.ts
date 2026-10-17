@@ -1,3 +1,4 @@
+import { expectedPositionSeconds } from "@/lib/playback-sync";
 import type { MediaType } from "@/lib/types";
 
 export interface WatchRoom {
@@ -19,6 +20,5 @@ export function validRoomId(value: string) {
 }
 
 export function roomPosition(room: WatchRoom, now = Date.now()) {
-  const elapsed = room.is_playing ? Math.max(0, (now - Date.parse(room.updated_at)) / 1000) : 0;
-  return Math.max(0, Math.floor(room.position_seconds + (Number.isFinite(elapsed) ? elapsed : 0)));
+  return expectedPositionSeconds(room.position_seconds, room.updated_at, room.is_playing, now);
 }

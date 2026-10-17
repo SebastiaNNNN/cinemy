@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { loadParty, partyFetch } from "@/lib/party-client";
+import { isStalePlaybackUpdate } from "@/lib/playback-sync";
 import { supabase } from "@/lib/supabase";
 import { validPartyId, type WatchParty } from "@/lib/watch-party";
 
@@ -34,8 +35,7 @@ export function PartyProvider({ children }: { children: React.ReactNode }) {
 
   const acceptParty = useCallback((next: WatchParty) => {
     const previous = partyRef.current;
-    if (previous?.id === next.id && (next.playback_revision < previous.playback_revision
-      || (next.playback_revision === previous.playback_revision && next.updated_at < previous.updated_at))) return;
+    if (previous?.id === next.id && isStalePlaybackUpdate(next, previous)) return;
     partyRef.current = next;
     setParty(next);
   }, []);
@@ -65,10 +65,17 @@ export function PartyProvider({ children }: { children: React.ReactNode }) {
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "watch_parties", filter: `id=eq.${id}` },
         (payload) => acceptParty(payload.new as WatchParty))
       .subscribe();
-    const poll = window.setInterval(() => {
-      void loadParty(id).then(acceptParty).catch(() => {});
-    }, 5000);
-    return () => { window.clearInterval(poll); void supabase?.removeChannel(channel); };
+    const refresh = () => { void loadParty(id).then(acceptParty).catch(() => {}); };
+    const poll = window.setInterval(refresh, 5000);
+    const resyncWhenVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", resyncWhenVisible);
+    window.addEventListener("focus", resyncWhenVisible);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", resyncWhenVisible);
+      window.removeEventListener("focus", resyncWhenVisible);
+      void supabase?.removeChannel(channel);
+    };
   }, [acceptParty, party?.id, party?.host_user_id, userId]);
 
   const updateParty = useCallback(async (body: Record<string, unknown>) => {

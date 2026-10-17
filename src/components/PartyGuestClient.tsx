@@ -7,6 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { useCatalogLanguage } from "@/components/CatalogLanguageProvider";
 import { PlayerModal } from "@/components/PlayerModal";
 import { loadParty, partyFetch } from "@/lib/party-client";
+import { isStalePlaybackUpdate } from "@/lib/playback-sync";
 import { supabase } from "@/lib/supabase";
 import type { Movie } from "@/lib/types";
 import { partyPosition, validPartyId, type WatchParty } from "@/lib/watch-party";
@@ -24,6 +25,7 @@ export function PartyGuestClient({ partyId }: { partyId: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const currentRef = useRef<View | null>(null);
+  const missedPollsRef = useRef(0);
   const joined = Boolean(view);
 
   useEffect(() => {
@@ -34,8 +36,7 @@ export function PartyGuestClient({ partyId }: { partyId: string }) {
 
   const acceptParty = useCallback((next: WatchParty) => {
     const previous = currentRef.current;
-    if (previous && (next.playback_revision < previous.party.playback_revision
-      || (next.playback_revision === previous.party.playback_revision && next.updated_at < previous.party.updated_at))) return;
+    if (previous && isStalePlaybackUpdate(next, previous.party)) return;
     const playbackStart = !previous || previous.party.playback_revision !== next.playback_revision
       ? partyPosition(next) : previous.playbackStart;
     const updated = { party: next, playbackStart };
@@ -58,10 +59,23 @@ export function PartyGuestClient({ partyId }: { partyId: string }) {
         (payload) => acceptParty(payload.new as WatchParty))
       .subscribe();
     const poll = window.setInterval(() => {
-      void loadParty(partyId).then((next) => { acceptParty(next); setNotice(""); })
-        .catch(() => setNotice(ro ? "Conexiunea s-a întrerupt. Reîncercăm..." : "Connection lost. Retrying..."));
+      void loadParty(partyId)
+        .then((next) => { acceptParty(next); missedPollsRef.current = 0; setNotice(""); })
+        .catch(() => {
+          missedPollsRef.current += 1;
+          if (missedPollsRef.current >= 3) setNotice(ro ? "Conexiunea s-a întrerupt. Reîncercăm..." : "Connection lost. Retrying...");
+        });
     }, 5000);
-    return () => { window.clearInterval(poll); void supabase?.removeChannel(channel); };
+    // Returning to the tab resyncs immediately instead of waiting for the poll.
+    const resyncWhenVisible = () => { if (document.visibilityState === "visible") { void loadParty(partyId).then((next) => { acceptParty(next); missedPollsRef.current = 0; setNotice(""); }).catch(() => {}); } };
+    document.addEventListener("visibilitychange", resyncWhenVisible);
+    window.addEventListener("focus", resyncWhenVisible);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", resyncWhenVisible);
+      window.removeEventListener("focus", resyncWhenVisible);
+      void supabase?.removeChannel(channel);
+    };
   }, [acceptParty, joined, partyId, ro, userId]);
 
   const party = view?.party;

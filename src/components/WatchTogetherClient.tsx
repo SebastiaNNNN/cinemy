@@ -7,6 +7,7 @@ import { PlayerModal } from "@/components/PlayerModal";
 import { useAuth } from "@/components/AuthProvider";
 import { useCatalogLanguage } from "@/components/CatalogLanguageProvider";
 import { getAccessToken } from "@/lib/auth-token";
+import { isStalePlaybackUpdate } from "@/lib/playback-sync";
 import { supabase } from "@/lib/supabase";
 import type { Movie, TvSeason } from "@/lib/types";
 import { roomPosition, validRoomId, type WatchRoom } from "@/lib/watch-room";
@@ -46,13 +47,11 @@ export function WatchTogetherClient({ roomId }: { roomId: string }) {
   const [busy, setBusy] = useState(false);
   const lastProgressSentRef = useRef(0);
   const currentPositionRef = useRef(0);
+  const missedPollsRef = useRef(0);
 
   const acceptRoom = useCallback((next: WatchRoom) => {
     setView((previous) => {
-      if (previous && (next.playback_revision < previous.room.playback_revision
-        || (next.playback_revision === previous.room.playback_revision && next.updated_at < previous.room.updated_at))) {
-        return previous;
-      }
+      if (previous && isStalePlaybackUpdate(next, previous.room)) return previous;
       const playbackStart = !previous || previous.room.playback_revision !== next.playback_revision
         ? roomPosition(next)
         : previous.playbackStart;
@@ -87,14 +86,26 @@ export function WatchTogetherClient({ roomId }: { roomId: string }) {
         filter: `id=eq.${roomId}`,
       }, (payload) => acceptRoom(payload.new as WatchRoom))
       .subscribe();
-    // Polling recovers from a dropped Realtime connection or missed event.
-    const poll = window.setInterval(() => {
+    // Polling recovers from a dropped Realtime connection or a missed event.
+    // A single hiccup is normal, so the warning only appears after several
+    // failed polls in a row, and any success clears it.
+    const refresh = () => {
       void roomRequest(`/api/watch-rooms/${roomId}`, "GET")
-        .then((next) => { acceptRoom(next); setNotice(""); })
-        .catch(() => setNotice(ro ? "Conexiunea cu camera s-a întrerupt. Reîncercăm..." : "Room connection lost. Retrying..."));
-    }, 10_000);
+        .then((next) => { acceptRoom(next); missedPollsRef.current = 0; setNotice(""); })
+        .catch(() => {
+          missedPollsRef.current += 1;
+          if (missedPollsRef.current >= 3) setNotice(ro ? "Conexiunea cu camera s-a întrerupt. Reîncercăm..." : "Room connection lost. Retrying...");
+        });
+    };
+    const poll = window.setInterval(refresh, 10_000);
+    // Returning to the tab resyncs immediately instead of waiting for the poll.
+    const resyncWhenVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", resyncWhenVisible);
+    window.addEventListener("focus", resyncWhenVisible);
     return () => {
       window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", resyncWhenVisible);
+      window.removeEventListener("focus", resyncWhenVisible);
       void supabase?.removeChannel(channel);
     };
   }, [acceptRoom, joined, roomId, ro, userId]);

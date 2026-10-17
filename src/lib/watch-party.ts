@@ -1,3 +1,4 @@
+import { expectedPositionSeconds } from "@/lib/playback-sync";
 import type { MediaType } from "@/lib/types";
 
 export interface WatchParty {
@@ -23,6 +24,5 @@ export function validPartyId(value: string) {
 }
 
 export function partyPosition(party: WatchParty, now = Date.now()) {
-  const elapsed = party.is_playing ? Math.max(0, (now - Date.parse(party.playback_updated_at)) / 1000) : 0;
-  return Math.max(0, Math.floor(party.position_seconds + (Number.isFinite(elapsed) ? elapsed : 0)));
+  return expectedPositionSeconds(party.position_seconds, party.playback_updated_at, party.is_playing, now);
 }
