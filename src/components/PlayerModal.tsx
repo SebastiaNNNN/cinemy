@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Movie, WatchHistory } from "@/lib/types";
+import type { Movie } from "@/lib/types";
 import { movieTitle, movieYear } from "@/lib/types";
 import { saveWatchProgress } from "@/lib/progress-storage";
+import { buildWatchHistory } from "@/lib/watch-progress";
 import { streamEmbedUrl } from "@/lib/stream-provider";
 import { useCatalogLanguage } from "@/components/CatalogLanguageProvider";
 import { useAuth } from "@/components/AuthProvider";
@@ -144,17 +145,14 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, lang
 
   const saveProgress = useCallback(async (keepalive = false): Promise<boolean> => {
     // Merely opening a title must not create a zero-second Continue Watching entry.
-    if (currentRef.current <= 0) return true;
-    const item: WatchHistory = {
-      media_id: `${mediaType}_${movie.id}`,
-      title: movieTitle(movie),
-      poster_path: movie.poster_path,
-      backdrop_path: movie.backdrop_path,
-      progress_seconds: Math.floor(currentRef.current),
-      duration_seconds: Math.max(Math.floor(durationRef.current), Math.floor(currentRef.current)),
-      season_number: mediaType === "tv" ? seasonRef.current : undefined,
-      episode_number: mediaType === "tv" ? episodeRef.current : undefined,
-    };
+    const item = buildWatchHistory(movie, {
+      mediaType,
+      positionSeconds: currentRef.current,
+      durationSeconds: durationRef.current,
+      season: seasonRef.current,
+      episode: episodeRef.current,
+    });
+    if (!item) return true;
     try {
       const saved = await saveWatchProgress(item, keepalive);
       if (saved) {
@@ -166,7 +164,7 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, lang
       setProgressSaveError(true);
       return false;
     }
-  }, [episode, mediaType, movie, onProgressSaved, season]);
+  }, [mediaType, movie, onProgressSaved]);
 
   useEffect(() => {
     currentRef.current = resumeAt;
@@ -192,47 +190,55 @@ export function PlayerModal({ movie, resumeAt = 0, season = 1, episode = 1, lang
     return () => window.clearTimeout(timer);
   }, [episode, movie.id, resumeAt, retryCount, roomPlaying, season, shareMenuOpen, sourceUrl]);
 
-  useEffect(() => {
-    // Vidstuck sends JSON-string progress messages from the embedded frame.
-    const receiveProgress = (event: MessageEvent) => {
-      if (event.source !== streamRef.current?.contentWindow || event.origin !== new URL(sourceUrl).origin) return;
-      let data: unknown = event.data;
-      if (typeof data === "string") {
-        try { data = JSON.parse(data); } catch { return; }
-      }
-      if (!data || typeof data !== "object") return;
-      const payload = data as {
-        id?: unknown;
-        type?: unknown;
-        timestamp?: unknown;
-        duration?: unknown;
-        season?: unknown;
-        episode?: unknown;
-      };
-      if (payload.id !== undefined && Number(payload.id) !== movie.id) return;
-      if (payload.type !== undefined && payload.type !== mediaType) return;
-      if (mediaType === "tv" && (
-        (payload.season !== undefined && Number(payload.season) !== season)
-        || (payload.episode !== undefined && Number(payload.episode) !== episode)
-      )) return;
-      const timestamp = Number(payload.timestamp);
-      const duration = Number(payload.duration);
-      if (!Number.isFinite(timestamp) || timestamp < 0) return;
-      if (timestamp > lastPositionRef.current + 0.5) {
-        playbackObservedRef.current = true;
-        setStreamNeedsAttention(false);
-      }
-      lastPositionRef.current = timestamp;
-      updatePlaybackPosition(timestamp, Number.isFinite(duration) && duration > 0 ? duration : undefined);
-      watchTogether?.onProgress(timestamp, Number.isFinite(duration) && duration > 0 ? duration : durationRef.current);
-      if (Date.now() - lastSavedAtRef.current >= 10_000) {
-        lastSavedAtRef.current = Date.now();
-        void saveProgress();
-      }
+  // The embedded frame posts progress as JSON messages. The handler is kept in
+  // a ref and the listener is registered once, so a re-render can never drop a
+  // progress update mid-playback.
+  const receiveProgressRef = useRef<(event: MessageEvent) => void>(() => {});
+  receiveProgressRef.current = (event: MessageEvent) => {
+    if (event.source !== streamRef.current?.contentWindow) return;
+    let streamOrigin: string;
+    try { streamOrigin = new URL(sourceUrl).origin; } catch { return; }
+    if (event.origin !== streamOrigin) return;
+    let data: unknown = event.data;
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch { return; }
+    }
+    if (!data || typeof data !== "object") return;
+    const payload = data as {
+      id?: unknown;
+      type?: unknown;
+      timestamp?: unknown;
+      duration?: unknown;
+      season?: unknown;
+      episode?: unknown;
     };
-    window.addEventListener("message", receiveProgress);
-    return () => window.removeEventListener("message", receiveProgress);
-  }, [episode, mediaType, movie.id, saveProgress, season, sourceUrl, updatePlaybackPosition, watchTogether]);
+    if (payload.id !== undefined && Number(payload.id) !== movie.id) return;
+    if (payload.type !== undefined && payload.type !== mediaType) return;
+    if (mediaType === "tv" && (
+      (payload.season !== undefined && Number(payload.season) !== season)
+      || (payload.episode !== undefined && Number(payload.episode) !== episode)
+    )) return;
+    const timestamp = Number(payload.timestamp);
+    const duration = Number(payload.duration);
+    if (!Number.isFinite(timestamp) || timestamp < 0) return;
+    if (timestamp > lastPositionRef.current + 0.5) {
+      playbackObservedRef.current = true;
+      setStreamNeedsAttention(false);
+    }
+    lastPositionRef.current = timestamp;
+    updatePlaybackPosition(timestamp, Number.isFinite(duration) && duration > 0 ? duration : undefined);
+    watchTogether?.onProgress(timestamp, Number.isFinite(duration) && duration > 0 ? duration : durationRef.current);
+    if (Date.now() - lastSavedAtRef.current >= 10_000) {
+      lastSavedAtRef.current = Date.now();
+      void saveProgress();
+    }
+  };
+
+  useEffect(() => {
+    const listener = (event: MessageEvent) => receiveProgressRef.current(event);
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, []);
 
   useEffect(() => {
     if (nextCountdown === null || nextCountdown <= 0) return;

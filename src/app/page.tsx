@@ -15,6 +15,7 @@ import { mergeRecommendations, nextEpisodeFromHistory, recommendationSeeds } fro
 import type { Movie, TvShowDetails, WatchHistory } from "@/lib/types";
 import { movieTitle } from "@/lib/types";
 import { loadWatchHistory } from "@/lib/progress-storage";
+import { isWatchComplete } from "@/lib/watch-progress";
 import { useCatalogLanguage } from "@/components/CatalogLanguageProvider";
 import { rememberWatchReturn, watchHref } from "@/lib/watch-links";
 
@@ -180,7 +181,9 @@ export default function Home() {
 
   const progressMap = useMemo(() => new Map(history.map((item) => [item.media_id, item])), [history]);
   const excludedIds = useMemo(() => new Set([...history.map((item) => item.media_id), ...savedItems.map((item) => item.media_id)]), [history, savedItems]);
-  const continueMovies = useMemo<Movie[]>(() => history.map((item) => ({
+  const continueMovies = useMemo<Movie[]>(() => history
+    .filter((item) => !isWatchComplete(item))
+    .map((item) => ({
     id: Number(item.media_id.replace(/^.*?_/, "")),
     media_type: item.media_id.startsWith("tv_") ? "tv" : "movie",
     title: item.title,
