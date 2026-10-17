@@ -1,5 +1,7 @@
 # Cinemy
 
+[![CI](https://github.com/SebastiaNNNN/cinemy/actions/workflows/ci.yml/badge.svg)](https://github.com/SebastiaNNNN/cinemy/actions/workflows/ci.yml)
+
 Aplicație locală Next.js 16 pentru catalog TMDB, player video configurabil și progres sincronizat prin Supabase. Necesită Node.js 20.9 sau mai nou.
 
 ## Pornire locală
