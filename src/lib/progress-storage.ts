@@ -1,53 +1,34 @@
 import type { WatchHistory } from "@/lib/types";
+import { getAccessToken } from "@/lib/auth-token";
 
-const STORAGE_KEY = "cinemy.watch-history.v1";
-
-function readLocalHistory(): WatchHistory[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "[]") as WatchHistory[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeLocalHistory(history: WatchHistory[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+async function progressError(response: Response) {
+  const data = await response.json().catch(() => ({})) as { error?: string };
+  return new Error(data.error || `Watch history request failed (${response.status}).`);
 }
 
 export async function loadWatchHistory(): Promise<WatchHistory[]> {
-  try {
-    const response = await fetch("/api/progress", { cache: "no-store" });
-    if (!response.ok) throw new Error("Supabase indisponibil");
-    const remote = (await response.json()) as WatchHistory[];
-    if (!Array.isArray(remote)) throw new Error("Răspuns invalid");
-    writeLocalHistory(remote);
-    return remote;
-  } catch {
-    return readLocalHistory().sort((a, b) =>
-      String(b.updated_at || "").localeCompare(String(a.updated_at || "")),
-    );
-  }
+  const token = await getAccessToken();
+  if (!token) return [];
+  const response = await fetch("/api/progress", {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw await progressError(response);
+  const history = await response.json() as WatchHistory[];
+  if (!Array.isArray(history)) throw new Error("Invalid watch history response.");
+  return history;
 }
 
 export async function saveWatchProgress(item: WatchHistory, keepalive = false) {
+  const token = await getAccessToken();
+  if (!token) return null;
   const updated: WatchHistory = { ...item, updated_at: new Date().toISOString() };
-  const local = readLocalHistory();
-  const next = [updated, ...local.filter((entry) => entry.media_id !== item.media_id)];
-  writeLocalHistory(next);
-
-  try {
-    const response = await fetch("/api/progress", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updated),
-      keepalive,
-    });
-    if (!response.ok) throw new Error("Supabase indisponibil");
-  } catch {
-    // LocalStorage este sursa de rezervă și conține deja cea mai nouă valoare.
-  }
-
+  const response = await fetch("/api/progress", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(updated),
+    keepalive,
+  });
+  if (!response.ok) throw await progressError(response);
   return updated;
 }

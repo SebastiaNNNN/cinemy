@@ -1,61 +1,81 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navbar } from "@/components/Navbar";
-import { PlayerModal } from "@/components/PlayerModal";
-import type { Movie } from "@/lib/types";
+import { TvShowDetailsModal } from "@/components/TvShowDetailsModal";
+import { TitleDetailsModal } from "@/components/TitleDetailsModal";
+import type { MediaType, Movie, WatchHistory } from "@/lib/types";
 import { movieTitle, movieYear } from "@/lib/types";
+import { useCatalogLanguage } from "@/components/CatalogLanguageProvider";
+import { rememberWatchReturn, watchHref } from "@/lib/watch-links";
+import { loadWatchHistory } from "@/lib/progress-storage";
+import { useAuth } from "@/components/AuthProvider";
+import { useTmdbGenres } from "@/lib/tmdb-genres";
 
-const TMDB_PAGES_PER_VIEW = 5;
-const RESULTS_PER_BATCH = 20;
+interface ExploreClientProps {
+  mediaType?: MediaType;
+}
 
-const genreNames: Record<string, string> = {
-  "28": "Acțiune",
-  "35": "Comedie",
-  "18": "Dramă",
-  "878": "Science Fiction",
-  "27": "Horror",
-  "53": "Thriller",
-};
-
-export function ExploreClient() {
+export function ExploreClient({ mediaType: fixedMediaType }: ExploreClientProps = {}) {
+  const { language, text } = useCatalogLanguage();
+  const { genres } = useTmdbGenres(language);
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [movies, setMovies] = useState<Movie[]>([]);
-  const [selected, setSelected] = useState<Movie | null>(null);
   const [loadedBatches, setLoadedBatches] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedTv, setSelectedTv] = useState<Movie | null>(null);
+  const [detailsMovie, setDetailsMovie] = useState<Movie | null>(null);
+  const [history, setHistory] = useState<WatchHistory[]>([]);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
   const genre = searchParams.get("genre") || "";
+  const requestedMediaType = searchParams.get("media_type");
+  const activeMediaType = fixedMediaType ?? (requestedMediaType === "tv" ? "tv" : requestedMediaType === "movie" ? "movie" : undefined);
   const explicitType = searchParams.get("type");
-  const type = searchParams.has("top_rated")
+  const type = fixedMediaType ? "popular" : searchParams.has("top_rated")
     ? "top_rated"
     : searchParams.has("trending")
       ? "trending"
-      : explicitType === "top_rated" ? "top_rated" : "trending";
-  const page = Math.max(1, Number(searchParams.get("page")) || 1);
+      : explicitType === "top_rated" ? "top_rated" : explicitType === "trending_tv" ? "trending_tv" : "trending";
 
   const title = query
-    ? `Rezultate pentru „${query}”`
+    ? text.searchResults(query)
+    : fixedMediaType === "movie"
+      ? text.movies
+      : fixedMediaType === "tv"
+        ? text.tvSeries
     : genre
-      ? genreNames[genre] || "Categorie"
-      : type === "top_rated" ? "Cele mai apreciate" : "În tendințe";
+      ? genres[activeMediaType ?? "movie"].find((item) => String(item.id) === genre)?.name || text.genres[genre] || text.category
+      : type === "top_rated" ? text.topRated : type === "trending_tv" ? text.trendingTv : text.trending;
 
   const requestBase = useMemo(() => {
-    if (query.trim()) return `q=${encodeURIComponent(query.trim())}`;
-    if (genre) return `genre=${genre}`;
-    return `type=${type}`;
-  }, [genre, query, type]);
+    const mediaFilter = activeMediaType ? `&media_type=${activeMediaType}` : "";
+    if (query.trim()) return `q=${encodeURIComponent(query.trim())}${mediaFilter}`;
+    if (genre) return `genre=${genre}${mediaFilter}`;
+    return `type=${type}${mediaFilter}`;
+  }, [activeMediaType, genre, query, type]);
 
   useEffect(() => {
+    let active = true;
+    setHistory([]);
+    if (authLoading || !user) return;
+    void loadWatchHistory()
+      .then((items) => { if (active) setHistory(items); })
+      .catch(() => { if (active) setHistory([]); });
+    return () => { active = false; };
+  }, [authLoading, user?.id]);
+
+  useEffect(() => {
+    setMovies([]);
     setLoadedBatches(1);
-  }, [genre, page, query, type]);
+    setHasMore(true);
+  }, [fixedMediaType, genre, language, query, type]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,21 +83,18 @@ export function ExploreClient() {
       setLoading(true);
       setError("");
       try {
-        const firstTmdbPage = (page - 1) * TMDB_PAGES_PER_VIEW + 1;
-        const requests = Array.from({ length: loadedBatches }, (_, index) =>
-          fetch(`/api/movies?${requestBase}&page=${firstTmdbPage + index}`, { signal: controller.signal })
-            .then(async (response) => {
-              const data = (await response.json()) as { results?: Movie[]; error?: string };
-              if (!response.ok) throw new Error(data.error || "Catalogul nu este disponibil.");
-              return data.results || [];
-            }),
-        );
-        const batches = await Promise.all(requests);
-        const uniqueMovies = Array.from(
-          new Map(batches.flat().map((movie) => [movie.id, movie])).values(),
-        );
-        setMovies(uniqueMovies.slice(0, 100));
-        setHasMore((batches.at(-1)?.length || 0) >= RESULTS_PER_BATCH);
+        const response = await fetch(`/api/movies?${requestBase}&page=${loadedBatches}&language=${encodeURIComponent(language)}`, { signal: controller.signal });
+        const data = (await response.json()) as { results?: Movie[]; page?: number; total_pages?: number; error?: string };
+        if (!response.ok) throw new Error(data.error || text.catalogUnavailable);
+        const incoming = data.results || [];
+        setMovies((current) => Array.from(
+          new Map(
+            [...(loadedBatches === 1 ? [] : current), ...incoming]
+              .map((movie) => [`${movie.media_type || "movie"}_${movie.id}`, movie]),
+          ).values(),
+        ));
+        const currentPage = data.page || loadedBatches;
+        setHasMore(currentPage < (data.total_pages || currentPage));
       } catch (reason) {
         if ((reason as Error).name !== "AbortError") setError((reason as Error).message);
       } finally {
@@ -88,16 +105,24 @@ export function ExploreClient() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [loadedBatches, page, query, requestBase]);
+  }, [language, loadedBatches, query, requestBase, text.catalogUnavailable]);
 
-  const pageHref = (nextPage: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("page", String(nextPage));
-    return `/explore?${params.toString()}`;
+  const canLoadMore = hasMore;
+
+  const openMovie = (movie: Movie) => {
+    if (movie.media_type === "tv" || Boolean(movie.first_air_date) || Boolean(movie.name)) {
+      setSelectedTv(movie);
+      return;
+    }
+    setDetailsMovie(movie);
   };
 
-  const canLoadMore = loadedBatches < TMDB_PAGES_PER_VIEW && hasMore;
-  const reachedPageLimit = loadedBatches === TMDB_PAGES_PER_VIEW || !hasMore;
+  const openTvEpisode = (show: Movie, season: number, episode: number) => {
+    const href = watchHref({ ...show, media_type: "tv" }, season, episode);
+    rememberWatchReturn(href);
+    setSelectedTv(null);
+    router.push(href);
+  };
 
   useEffect(() => {
     const sentinel = loadMoreSentinelRef.current;
@@ -106,7 +131,7 @@ export function ExploreClient() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          setLoadedBatches((count) => Math.min(TMDB_PAGES_PER_VIEW, count + 1));
+          setLoadedBatches((count) => count + 1);
         }
       },
       { rootMargin: "500px 0px", threshold: 0.01 },
@@ -117,21 +142,21 @@ export function ExploreClient() {
 
   return (
     <main className="explore-page">
-      <Navbar query={query} onQueryChange={setQuery} />
+      <Navbar query={query} onQueryChange={setQuery} searchLabel={fixedMediaType === "tv" ? text.searchSeries : text.searchMovies} />
       <section className="explore-header">
-        <button className="back-button" type="button" onClick={() => router.back()}>← Înapoi</button>
-        <p>EXPLOREAZĂ CATALOGUL</p>
+        <button className="back-button" type="button" onClick={() => router.back()}>← {text.back}</button>
+        <p>{fixedMediaType === "movie" ? text.browseMovies : fixedMediaType === "tv" ? text.browseSeries : text.exploreCatalog}</p>
         <h1>{title}</h1>
-        <span>{loading ? "Se încarcă…" : `${movies.length} din maximum 100 · pagina ${page}`}</span>
+        <span>{loading ? text.loading : text.resultCount(movies.length, loadedBatches)}</span>
       </section>
 
       {error && <div className="explore-error">{error}</div>}
       <section className="explore-grid" aria-busy={loading}>
         {movies.map((movie) => (
-          <button className="explore-card" key={movie.id} onClick={() => setSelected(movie)}>
+          <button className="explore-card" key={`${movie.media_type || "movie"}_${movie.id}`} onClick={() => openMovie(movie)}>
             {movie.poster_path ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`} alt={`Poster ${movieTitle(movie)}`} />
+              <img src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`} alt={`${text.poster} ${movieTitle(movie)}`} />
             ) : <div className="poster-placeholder">{movieTitle(movie)}</div>}
             <span className="explore-card-info">
               <strong>{movieTitle(movie)}</strong>
@@ -142,17 +167,37 @@ export function ExploreClient() {
       </section>
 
       <div ref={loadMoreSentinelRef} className="infinite-scroll-sentinel" aria-live="polite">
-        {canLoadMore && <span>{loading ? "Se încarcă filmele…" : "Derulează pentru mai multe"}</span>}
+        {canLoadMore && <span>{loading ? text.loadingMovies : text.scrollForMore}</span>}
       </div>
 
-      {reachedPageLimit && !query && (
-        <nav className="pagination" aria-label="Paginare">
-          {page > 1 ? <Link href={pageHref(page - 1)}>← 100 anterioare</Link> : <span />}
-          {hasMore && <Link href={pageHref(page + 1)}>Următoarele 100 →</Link>}
-        </nav>
+      {selectedTv && (
+        <TvShowDetailsModal
+          show={selectedTv}
+          resumeSeason={history.find((item) => item.media_id === `tv_${selectedTv.id}`)?.season_number}
+          resumeEpisode={history.find((item) => item.media_id === `tv_${selectedTv.id}`)?.episode_number}
+          onClose={() => setSelectedTv(null)}
+          onPlay={openTvEpisode}
+        />
+      )}
+      {detailsMovie && (
+        <TitleDetailsModal
+          movie={detailsMovie}
+          hasProgress={history.some((item) => item.media_id === `movie_${detailsMovie.id}`)}
+          onClose={() => setDetailsMovie(null)}
+          onPlay={(movie) => {
+            const href = watchHref(movie, 1, 1);
+            rememberWatchReturn(href);
+            setDetailsMovie(null);
+            router.push(href);
+          }}
+        />
       )}
 
-      {selected && <PlayerModal movie={selected} onClose={() => setSelected(null)} />}
     </main>
   );
+}
+
+export function ExploreLoading() {
+  const { text } = useCatalogLanguage();
+  return <div className="explore-loading">{text.preparingCatalog}</div>;
 }
