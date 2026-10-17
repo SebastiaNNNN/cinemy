@@ -39,6 +39,15 @@
     ".next-dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "dist",
+    "build",
+    "outputs",
+    "tmp",
+    ".dbg",
+    ".vinext",
+    ".wrangler",
+    "cinemy-github-ready-*",
+    "cinemy-github-upload-*"
   ]
 }
